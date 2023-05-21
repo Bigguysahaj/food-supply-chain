@@ -3,7 +3,7 @@ const hre = require("hardhat");
 async function main() {
 
   const Supplychain = await hre.ethers.getContractFactory("Supplychain");
-  const supplychain = await Lock.deploy(unlockTime, { value: lockedAmount });
+  const supplychain = await Supplychain.deploy();
 
   await supplychain.deployed();
 

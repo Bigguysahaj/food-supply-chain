@@ -2,62 +2,113 @@
 pragma solidity ^0.8.0;
 
 contract Supplychain {
-    struct Item {
-        address itemId;
-        string name;
-        uint256 expirationDate;
-        uint256 quantity;
-        address owner;
-        string[] nutrient;
-        bool isEmpty;
+    enum ShipmentStatus {PENDING, IN_TRANSIT, DELIVERED}
+
+    struct Shipment {
+        address sender;
+        address reciever;
+        uint256 pickupTime;
+        uint256 deliveryTime;
+        uint256 distance;
+        uint256 price;
+        ShipmentStatus status;
+        bool isPaid;
     }
 
-    mapping(address => Item) public items;
-    uint256 public itemCount;
+    mapping(address => Shipment[]) public shipments;
+    uint256 public shipmentCount;
 
-    event ItemAdded(address itemId, string name, uint256 expirationDate, uint256 quantity, address owner, string[] nutrient);
-    event ItemUpdated(address itemId, string name, uint256 expirationDate, uint256 quantity, address owner, string[] nutrient);
-    event ItemClaimed(address itemId, address claimer);
+    struct TyepShipment{
+        address sender;
+        address reciever;
+        uint256 pickupTime;
+        uint256 deliveryTime;
+        uint256 distance;
+        uint256 price;
+        ShipmentStatus status;
+        bool isPaid;
+    }
 
-    function addItem(address _itemId, string memory _name, uint256 _expirationDate, uint256 _quantity, string[] memory _nutrient) public {
-        require(items[_itemId].itemId == address(0), "Item with the same ID already exists");
-        itemCount++;
-        items[_itemId] = Item(_itemId, _name, _expirationDate, _quantity, msg.sender, _nutrient, false);
-        emit ItemAdded(
-            _itemId,
-            _name,
-            _expirationDate, 
-            _quantity, 
-            msg.sender, 
-            _nutrient
+    TyepShipment[] tyepShipments;
+
+
+    event ShipmentCreated(address indexed sender, address indexed reciever, uint256 pickupTime, uint256 distance, uint256 price);
+    event ShipmentInTransit(address indexed sender, address indexed reciever, uint256 pickupTime);
+    event ShipmentDelivered(address indexed sender, address indexed reciever, uint256 deliveryTime);
+    event ShipmentPaid(address indexed sender, address indexed reciever, uint256 amount);
+
+    constructor() {
+        shipmentCount = 0;
+    }
+
+    function createShipment(address _reciever, uint256 _pickupTime, uint256 _distance, uint256 _price) public payable {
+        require (msg.value == _price, "Payment amount must match the price.");
+
+        Shipment memory shipment = Shipment(msg.sender, _reciever, _pickupTime, 0, _distance, _price, ShipmentStatus.PENDING, false);
+
+        shipments[msg.sender].push(shipment);
+        shipmentCount++;
+
+        tyepShipments.push(
+            TyepShipment(msg.sender, _reciever, _pickupTime, 0, _distance, _price, ShipmentStatus.PENDING, false)
         );
+
+        emit ShipmentCreated(msg.sender, _reciever, _pickupTime, _distance, _price);
     }
 
-    function updateItem(address _itemId, string memory _name, uint256 _expirationDate, uint256 _quantity, string[] memory _nutrient) public {
-        Item storage item = items[_itemId];
-        require(msg.sender == item.owner, "Only item owner can update");
-        item.name = _name;
-        item.expirationDate = _expirationDate;
-        item.quantity = _quantity;
-        item.nutrient = _nutrient;
-        emit ItemUpdated(_itemId, _name, _expirationDate, _quantity, msg.sender, _nutrient);
+    function startShipment(address _sender, address _reciever, uint256 _index) public{
+        Shipment storage shipment = shipments[_sender][_index];
+        require(shipment.status == ShipmentStatus.PENDING, "Shipment is not pending.");
+        TyepShipment storage tyepShipment = tyepShipments[_index];
+
+        require(shipment.reciever == _reciever, "Invalid reciever.");
+        require(shipment.status == ShipmentStatus.PENDING, "Shipment already in transit."); 
+
+        shipment.status = ShipmentStatus.IN_TRANSIT;    
+        tyepShipment.status = ShipmentStatus.IN_TRANSIT;    
+
+        emit ShipmentInTransit(_sender, _reciever, shipment.pickupTime);
     }
 
-    function claimItem(address _itemId) public {
-        Item storage item = items[_itemId];
-        require(item.expirationDate > block.timestamp, "Item has expired");
-        require(item.quantity > 0, "Item is out of stock");
-        item.quantity--;
-        emit ItemClaimed(_itemId, msg.sender);
+
+    function completeShipment(address _sender, address _reciever, uint256 _index) public {
+        Shipment storage shipment = shipments[_sender][_index]; 
+        TyepShipment storage tyepShipment = tyepShipments[_index];
+
+        require(shipment.reciever == _reciever, "Invalid reciever.");
+        require(shipment.status == ShipmentStatus.IN_TRANSIT, "Shipment is not in transit.");
+        require(!shipment.isPaid, "Shipment already paid.");
+
+        shipment.status = ShipmentStatus.DELIVERED;
+        tyepShipment.status = ShipmentStatus.DELIVERED;
+        tyepShipment.deliveryTime = block.timestamp;
+        shipment.deliveryTime = block.timestamp;
+
+        uint256 amount = shipment.price;
+
+        payable(shipment.sender).transfer(amount);
+
+        shipment.isPaid = true;
+        tyepShipment.isPaid = true;
+
+        emit ShipmentDelivered(_sender, _reciever, shipment.deliveryTime);
+        emit ShipmentPaid(_sender, _reciever, amount);
     }
 
-    function getCurrentInventoryCount() public view returns (uint256) {
-        uint256 count;
-        for (uint256 i = 1; i <= itemCount; i++) {
-            if (!items[i].isEmpty) {
-                count += items[i].quantity;
-            }
+
+    function getShipment(address _sender, uint256 _index) public view returns (address, address, uint256, uint256, uint256, uint256, ShipmentStatus, bool) {
+        Shipment memory shipment = shipments[_sender][_index];
+        return(shipment.sender, shipment.reciever, shipment.pickupTime, shipment.deliveryTime, shipment.distance, shipment.price, shipment.status, shipment.isPaid);
+    }
+
+    function getShipmentCount(address _sender) public view returns (uint256) {
+        return shipments[_sender].length;
+    }
+
+    function getAllTransactions()
+        public view returns (TyepShipment[] memory){
+            return tyepShipments;
         }
-        return count;
-    }
+
 }
+
